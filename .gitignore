@@ -1,0 +1,18 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# pgrx
+.pgrx/
+*.so
+*.dylib
+
+# editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# logs
+*.log
