@@ -1,27 +1,29 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/pg-relay-core",
-    "crates/pg-relay-server",
-    "examples/kv-store",
-]
-
-[workspace.package]
+[package]
+name = "pg_relay"
 version = "0.0.1"
 edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/zerodha/pg-relay"
-rust-version = "1.75"
 
-[workspace.dependencies]
-anyhow = "1"
-async-trait = "0.1"
-bytes = "1"
-chrono = { version = "=0.4.38", features = ["serde"] }
-dashmap = "=5.5.3"
-serde = { version = "=1.0.210", features = ["derive"] }
-serde_json = "=1.0.128"
-thiserror = "=1.0.64"
-tokio = { version = "=1.40.0", features = ["full"] }
-tracing = "=0.1.40"
-uuid = { version = "=1.10.0", features = ["v4", "serde"] }
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["pg18"]
+pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
+pg_test = []
+
+[dependencies]
+pgrx = "=0.18.0"
+ureq = { version = "2", default-features = false, features = ["json"] }
+serde_json = "1"
+
+[dev-dependencies]
+pgrx-tests = "=0.18.0"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
