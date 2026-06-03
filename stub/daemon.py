@@ -4,11 +4,13 @@
 Pretends to be the real (remote) daemon. ALL table functions and their
 logic live here, never in the extension. Wire protocol:
 
-    Read :  GET /<name>?args=<url-encoded-json>   (never cached)
-    Write:  PUT /<name>   body = <args json>
+    Read  :  GET  /<name>?args=<url-encoded-json>   (never cached)
+    Write :  POST /<name>   body = <args json>
+    Update:  PUT  /<name>   body = <args json>
 
 Run it:   python3 stub/daemon.py
 Test it:  curl 'localhost:8080/kv_get?args=%7B%22key%22%3A%22foo%22%7D'
+          curl -X POST localhost:8080/kv_put -d '{"key":"foo","value":"bar"}'
           curl -X PUT localhost:8080/kv_put -d '{"key":"foo","value":"bar"}'
 """
 import json
@@ -67,10 +69,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send(rows, {"Cache-Control": "no-store"})  # reads must not be cached
         print(f"GET  {name}({args}) => {len(rows)} row(s)  [{self._caller()}]")
 
+    def _body_args(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length) or b"{}")
+
+    def do_POST(self):
+        name = urlparse(self.path).path.lstrip("/")
+        args = self._body_args()
+        rows = handle_write(name, args)
+        self._send(rows)
+        print(f"POST {name}({args}) => {len(rows)} row(s)  [{self._caller()}]  STORE={STORE}")
+
     def do_PUT(self):
         name = urlparse(self.path).path.lstrip("/")
-        length = int(self.headers.get("Content-Length", 0))
-        args = json.loads(self.rfile.read(length) or b"{}")
+        args = self._body_args()
         rows = handle_write(name, args)
         self._send(rows)
         print(f"PUT  {name}({args}) => {len(rows)} row(s)  [{self._caller()}]  STORE={STORE}")

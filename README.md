@@ -31,23 +31,26 @@ its **arguments** as `jsonb`, and both return a set of rows, one `jsonb`
 value per row (column name `row`).
 
 ```sql
--- READ  (STABLE)   -> GET  /<name>?args=<json>
+-- READ   (STABLE)   -> GET  /<name>?args=<json>
 SELECT * FROM pg_relay_read('kv_get', '{"key":"foo"}'::jsonb);
 
--- WRITE (VOLATILE)  -> PUT  /<name>   body = <args json>
+-- WRITE  (VOLATILE)  -> POST /<name>   body = <args json>
 SELECT * FROM pg_relay_write('kv_put', '{"key":"foo","value":"bar"}'::jsonb);
+
+-- UPDATE (VOLATILE)  -> PUT  /<name>   body = <args json>  (per-shard lock)
+SELECT * FROM pg_relay_update('kv_put', '{"key":"foo","value":"bar"}'::jsonb);
 
 -- pull fields out of the jsonb rows
 SELECT row->>'value' AS value
 FROM pg_relay_read('kv_get', '{"key":"foo"}'::jsonb);
 ```
 
-| | `pg_relay_read` | `pg_relay_write` |
-|---|---|---|
-| Volatility | `STABLE`, `parallel_restricted` | `VOLATILE`, `parallel_unsafe` |
-| HTTP method | `GET /<name>?args=<json>` | `PUT /<name>` (args in body) |
-| Side effects | none | mutates the daemon's data source |
-| Per-client lock | no | yes (see below) |
+| | `pg_relay_read` | `pg_relay_write` | `pg_relay_update` |
+|---|---|---|---|
+| Volatility | `STABLE`, `parallel_restricted` | `STABLE`, `parallel_restricted` | `VOLATILE`, `parallel_unsafe` |
+| HTTP method | `GET /<name>?args=<json>` | `POST /<name>` (args in body) | `PUT /<name>` (args in body) |
+| Side effects | none | mutates the daemon's data source | mutates the daemon's data source |
+| Per-client lock | no | no | yes (see below) |
 
 Why two functions and not one: the read/write split is what tells the Postgres
 planner whether a call is side-effect-free (so it may cache/parallelize it) or
@@ -61,7 +64,9 @@ carries read-vs-write:
 
 - **Read:** `GET /<name>?args=<url-encoded-json>` — responses are sent with
   `Cache-Control: no-store` so no proxy can serve stale reads.
-- **Write:** `PUT /<name>` with the args as the JSON request body.
+- **Write:** `POST /<name>` with the args as the JSON request body.
+- **Update:** `PUT /<name>` with the args as the JSON request body (per-shard
+  write serialization; see below).
 
 The daemon responds with `{"rows": [ ... ]}`. Each element becomes one result
 row. Any failure (couldn't connect, non-2xx status, non-JSON body, or a
@@ -109,8 +114,9 @@ To see the audit lines in `psql`: `SET client_min_messages = 'log';`
 
 ## Per-shard write locking
 
-`pg_relay_write` can serialize concurrent writes that share the same shard
-using a **transaction-scoped Postgres advisory lock**. The shard is identified
+`pg_relay_update` can serialize concurrent writes that share the same shard
+using a **transaction-scoped Postgres advisory lock**. (`pg_relay_write` does
+not lock.) The shard is identified
 by the args field named in `pg_relay.lock_key_field`. The lock auto-releases at
 the end of the statement's transaction.
 
@@ -161,7 +167,8 @@ talk to:
 ```bash
 python3 stub/daemon.py
 # GET  /kv_get?args=<json>   reads the in-memory store
-# PUT  /kv_put               writes the in-memory store
+# POST /kv_put               writes the in-memory store
+# PUT  /kv_put               updates the in-memory store (per-shard lock)
 ```
 
 Smoke test inside `psql`:

@@ -165,12 +165,30 @@ fn pg_relay_read(
     TableIterator::new(rows_from(req.call()).into_iter().map(|v| (JsonB(v),)))
 }
 
-/// Write relay. VOLATILE + parallel_unsafe. Before sending, it serializes
+/// Write relay. STABLE + parallel_restricted (like the read relay): it
+/// does SPI lookups and an external HTTP call, so it must run in the
+/// leader process. Sends the call to the daemon as a POST with `args` as
+/// the JSON request body. Unlike `pg_relay_update`, it does no per-shard
+/// write serialization.
+#[pg_extern(stable, parallel_restricted)]
+fn pg_relay_write(
+    table_function: &str,
+    args: JsonB,
+) -> TableIterator<'static, (name!(row, JsonB),)> {
+    let caller = current_caller();
+    log_call("POST", table_function, &args.0, &caller);
+
+    let url = format!("{}/{table_function}", daemon_base());
+    let req = with_caller(ureq::post(&url), &caller);
+    TableIterator::new(rows_from(req.send_json(args.0)).into_iter().map(|v| (JsonB(v),)))
+}
+
+/// Update relay. VOLATILE + parallel_unsafe. Before sending, it serializes
 /// concurrent writes that share the same shard (within this Postgres
 /// instance) via a transaction-scoped advisory lock keyed on the args
 /// field named by `pg_relay.lock_key_field`.
 #[pg_extern(volatile, parallel_unsafe)]
-fn pg_relay_write(
+fn pg_relay_update(
     table_function: &str,
     args: JsonB,
 ) -> TableIterator<'static, (name!(row, JsonB),)> {
