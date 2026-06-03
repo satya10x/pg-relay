@@ -64,7 +64,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         name = parsed.path.lstrip("/")
-        args = json.loads(parse_qs(parsed.query).get("args", ["{}"])[0])
+        # args come in the JSON body (pg_relay_read_json) when one is sent,
+        # otherwise from the ?args= query param (pg_relay_read).
+        if int(self.headers.get("Content-Length", 0)) > 0:
+            args = self._body_args()
+        else:
+            args = json.loads(parse_qs(parsed.query).get("args", ["{}"])[0])
         rows = handle_read(name, args)
         self._send(rows, {"Cache-Control": "no-store"})  # reads must not be cached
         print(f"GET  {name}({args}) => {len(rows)} row(s)  [{self._caller()}]")

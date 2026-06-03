@@ -165,6 +165,23 @@ fn pg_relay_read(
     TableIterator::new(rows_from(req.call()).into_iter().map(|v| (JsonB(v),)))
 }
 
+/// Read relay (JSON body variant). Same semantics as `pg_relay_read`
+/// (STABLE + parallel_restricted, logically read-only), but sends `args`
+/// as the JSON request body of the GET instead of the `args` query
+/// parameter — for daemons/endpoints that expect the arguments in the body.
+#[pg_extern(stable, parallel_restricted)]
+fn pg_relay_read_json(
+    table_function: &str,
+    args: JsonB,
+) -> TableIterator<'static, (name!(row, JsonB),)> {
+    let caller = current_caller();
+    log_call("GET", table_function, &args.0, &caller);
+
+    let url = format!("{}/{table_function}", daemon_base());
+    let req = with_caller(ureq::get(&url), &caller);
+    TableIterator::new(rows_from(req.send_json(args.0)).into_iter().map(|v| (JsonB(v),)))
+}
+
 /// Write relay. STABLE + parallel_restricted (like the read relay): it
 /// does SPI lookups and an external HTTP call, so it must run in the
 /// leader process. Sends the call to the daemon as a POST with `args` as
