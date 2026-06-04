@@ -141,9 +141,17 @@ fn rows_from(result: Result<ureq::Response, ureq::Error>) -> Vec<serde_json::Val
         .into_json()
         .unwrap_or_else(|e| error!("pg_relay: invalid daemon response: {e}"));
 
-    match json.get("rows").and_then(|r| r.as_array()) {
-        Some(arr) => arr.clone(),
-        None => error!("pg_relay: daemon response missing a 'rows' array"),
+    // Accept whatever shape the daemon returns:
+    //   {"rows": [ ... ]}  -> the wrapped array (one row per element)
+    //   [ ... ]            -> a bare array      (one row per element)
+    //   { ... } / scalar   -> a single document (exactly one row)
+    // The `rows` envelope is just one convention, not a requirement.
+    match json {
+        serde_json::Value::Object(ref map) if map.get("rows").map_or(false, |r| r.is_array()) => {
+            map["rows"].as_array().unwrap().clone()
+        }
+        serde_json::Value::Array(arr) => arr,
+        other => vec![other],
     }
 }
 
